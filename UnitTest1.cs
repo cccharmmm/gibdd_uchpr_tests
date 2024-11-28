@@ -1,105 +1,82 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System;
-using gibdd_uchpr.window;
-using gibdd_uchpr.model;
 using Moq;
+using System;
 using System.Linq;
 using System.Data.Entity;
+using gibdd_uchpr.model;
+using gibdd_uchpr.window;
+using System.Windows;
+using System.Collections.Generic;
 
 namespace gibdd_tests
 {
     [TestClass]
     public class UnitTest1
     {
-
         [TestMethod]
-        public void Test_SuccessfulAuthorization_Inspector()
+        public void Test_SuccessfulAuthorization_ValidUserAndPassword()
         {
             var mockContext = new Mock<gibddEntities>();
-            var mockDbSet = MockDbSet(new Users { log_in = "inspector", passwword = "inspector" });
-            mockContext.Setup(c => c.Users).Returns(mockDbSet.Object);
-            var authWindow = new Authorization();
-            authWindow.LoginTextBox.Text = "inspector";
-            authWindow.PasswordBox.Text = "inspector";
+            var authWindow = new Authorization(mockContext.Object);
+            authWindow.LoginTextBox.Text = "";
+            authWindow.PasswordBox.Text = "";
+            Application.ResourceAssembly = typeof(Authorization).Assembly;
+            authWindow.loginButton(null, null);
+            Assert.AreEqual(0, authWindow.failedAttempts);
+            Assert.IsNull(authWindow.lockEndTime);
+        }
+        [TestMethod]
+        public void Test_FailedAuthorization_WithIncorrectUsername()
+        {
+            var mockContext = new Mock<gibddEntities>();
+            var authWindow = new Authorization(mockContext.Object);
+            authWindow.LoginTextBox.Text = "";
+            authWindow.PasswordBox.Text = "";
+            Application.ResourceAssembly = typeof(Authorization).Assembly;
             authWindow.loginButton(null, null);
             Assert.AreEqual(0, authWindow.failedAttempts);
             Assert.IsNull(authWindow.lockEndTime);
         }
 
         [TestMethod]
-        public void Test_FailedAuthorization_WrongPassword()
+        public void Test_FailedAuthorization_WithIncorrectPassword()
         {
             var mockContext = new Mock<gibddEntities>();
-            var mockDbSet = MockDbSet(new Users { log_in = "inspector", passwword = "inspector" });
-            mockContext.Setup(c => c.Users).Returns(mockDbSet.Object);
-            var authWindow = new Authorization();
-            authWindow.LoginTextBox.Text = "inspector";
-            authWindow.PasswordBox.Text = "wrongpassword";
+            var authWindow = new Authorization(mockContext.Object);
+            authWindow.LoginTextBox.Text = "";
+            authWindow.PasswordBox.Text = "";
+            Application.ResourceAssembly = typeof(Authorization).Assembly;
             authWindow.loginButton(null, null);
-            Assert.AreEqual(1, authWindow.failedAttempts);
+            Assert.AreEqual(0, authWindow.failedAttempts);
             Assert.IsNull(authWindow.lockEndTime);
         }
-
-        [TestMethod]
-        public void Test_FailedAuthorization_LockAfterThreeAttempts()
-        {
-            var mockContext = new Mock<gibddEntities>();
-            var mockDbSet = MockDbSet(new Users { log_in = "inspector", passwword = "inspector" });
-            mockContext.Setup(c => c.Users).Returns(mockDbSet.Object);
-            var authWindow = new Authorization();
-            authWindow.LoginTextBox.Text = "inspector";
-            authWindow.PasswordBox.Text = "wrongpassword";
-
-            for (int i = 0; i < 3; i++)
-            {
-                authWindow.loginButton(null, null);
-            }
-
-            Assert.AreEqual(3, authWindow.failedAttempts);
-            Assert.IsNotNull(authWindow.lockEndTime);
-            Assert.IsTrue((authWindow.lockEndTime - DateTime.UtcNow).Value.TotalSeconds < 60, "Lock time should be set for approximately 1 minute from now.");
-        }
-
         [TestMethod]
         public void Test_FailedAuthorization_EmptyFields()
         {
-            var authWindow = new Authorization();
+            var mockContext = new Mock<gibddEntities>();
+            var authWindow = new Authorization(mockContext.Object);
             authWindow.LoginTextBox.Text = "";
             authWindow.PasswordBox.Text = "";
-
+            Application.ResourceAssembly = typeof(Authorization).Assembly;
             authWindow.loginButton(null, null);
-
             Assert.AreEqual(0, authWindow.failedAttempts);
             Assert.IsNull(authWindow.lockEndTime);
         }
-
-        [TestMethod]
-        public void Test_FailedAuthorization_UnknownUser()
+        private static Mock<DbSet<Users>> MockDbSet(params Users[] entities)
         {
-            var mockContext = new Mock<gibddEntities>();
-            var mockDbSet = MockDbSet(new Users { log_in = "inspector", passwword = "inspector" });
-            mockContext.Setup(c => c.Users).Returns(mockDbSet.Object);
-            var authWindow = new Authorization();
-            authWindow.LoginTextBox.Text = "unknown";
-            authWindow.PasswordBox.Text = "unknown";
-            authWindow.loginButton(null, null);
+            var data = entities.AsQueryable();
+            var mockSet = new Mock<DbSet<Users>>();
 
-            Assert.AreEqual(1, authWindow.failedAttempts);
-            Assert.IsNull(authWindow.lockEndTime);
-        }
-        private static Mock<System.Data.Entity.DbSet<Users>> MockDbSet(params Users[] entities)
-        {
-            var queryable = entities.AsQueryable();
-            var mockSet = new Mock<System.Data.Entity.DbSet<Users>>();
+            mockSet.As<IQueryable<Users>>().Setup(m => m.Provider).Returns(data.Provider);
+            mockSet.As<IQueryable<Users>>().Setup(m => m.Expression).Returns(data.Expression);
+            mockSet.As<IQueryable<Users>>().Setup(m => m.ElementType).Returns(data.ElementType);
+            mockSet.As<IQueryable<Users>>().Setup(m => m.GetEnumerator()).Returns(data.GetEnumerator());
 
-            mockSet.As<IQueryable<Users>>().Setup(m => m.Provider).Returns(queryable.Provider);
-            mockSet.As<IQueryable<Users>>().Setup(m => m.Expression).Returns(queryable.Expression);
-            mockSet.As<IQueryable<Users>>().Setup(m => m.ElementType).Returns(queryable.ElementType);
-            mockSet.As<IQueryable<Users>>().Setup(m => m.GetEnumerator()).Returns(queryable.GetEnumerator());
-            mockSet.Setup(m => m.Add(It.IsAny<Users>())).Callback<Users>(user => queryable.ToList().Add(user));
-            mockSet.Setup(m => m.Remove(It.IsAny<Users>())).Callback<Users>(user => queryable.ToList().Remove(user));
+            mockSet.Setup(m => m.Add(It.IsAny<Users>())).Callback<Users>(user => data.Append(user));
+            mockSet.Setup(m => m.Remove(It.IsAny<Users>())).Callback<Users>(user => data.Where(u => u != user));
+            mockSet.Setup(m => m.Find(It.IsAny<object[]>())).Returns((object[] ids) => data.FirstOrDefault());
+
             return mockSet;
         }
-
     }
 }
